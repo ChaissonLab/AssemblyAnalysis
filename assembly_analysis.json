@@ -1,0 +1,30 @@
+{ 
+		"assemblies" : { "cov-30" : ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.30x.haplotype1.fa",
+																 "/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.30x.haplotype2.fa"],
+										 "cov-40" : ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.40x.haplotype1.fa",
+																 "/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.40x.haplotype2.fa"],
+										 "cov-50" : ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.50x.haplotype1.fa",
+																 "/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.50x.haplotype2.fa"],
+										 "cov-75" : ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.75x.haplotype1.fa",
+																 "/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.75x.haplotype2.fa"],
+										 "ctg-1": ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/OneRun/assembly.1.consensus.fasta",
+															 "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/OneRun/assembly.2.consensus.fasta"],
+  "ccs-1" : [ "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/CCS_2/assembly.1.consensus.fasta",
+  "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/CCS_2/assembly.2.consensus.fasta"],
+  "tworuns" : [ "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/TwoRuns/assembly.1.consensus.fasta",
+               "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/TwoRuns/assembly.2.consensus.fasta"],
+  "oneruns" : [ "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/OneRun/assembly.1.consensus.fasta",
+               "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/OneRun/assembly.2.consensus.fasta"],
+  "flye2" : ["/home/cmb-panasas2/mchaisso//HG00514_2_flye/assembly.1.fasta",
+						 "/home/cmb-panasas2/mchaisso//HG00514_2_flye/assembly.2.fasta"]
+    },
+    "ref" : "/home/cmb-16/mjc/shared/references/hg38_noalts/indexes/lra/hg38.no_alts.fasta",
+
+		"grid_large" : "sbatch -c 16 --mem=32G --time=24:00:00 --partition=cmb",
+		"grid_manycore" : "sbatch -c 16 --mem=8G --time=24:00:00 --partition=cmb",
+		"grid_medium" : "sbatch -c 4 --mem=6G --time=24:00:00 --partition=cmb",
+		"grid_small" : "sbatch -c 1 --mem=1G --time=4:00:00 --partition=cmb",
+		"grid_blat" : "sbatch -c 1 --mem=6G --time=24:00:00 --partition=cmb"
+
+
+}
