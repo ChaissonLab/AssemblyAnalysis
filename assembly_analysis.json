@@ -1,4 +1,6 @@
 { 
+    "sample" : "HG00514",
+    "bam": "/home/cmb-16/nobackups/mjc/sample_datasets/hgsvg/HG00514/UMD_Sequel_II/pbmm2/HG00514.PacBioSequel2.EDEVI_20190319_S64018_PL100119428-5_B01.subreads.bam.sorted.bam",
 		"assemblies" : { "cov-30" : ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.30x.haplotype1.fa",
 																 "/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.30x.haplotype2.fa"],
 										 "cov-40" : ["/home/cmb-16/mjc/mchaisso/projects/hgsvg/AssemblyAnalysis/HG00514.SequelII.CLR.40x.haplotype1.fa",
@@ -15,8 +17,8 @@
                "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/TwoRuns/assembly.2.consensus.fasta"],
   "oneruns" : [ "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/OneRun/assembly.1.consensus.fasta",
                "/home/cmb-16/mjc/mchaisso/projects/hgsvg/ChromPipeline/OneRun/assembly.2.consensus.fasta"],
-  "flye2" : ["/home/cmb-panasas2/mchaisso//HG00514_2_flye/assembly.1.fasta",
-						 "/home/cmb-panasas2/mchaisso//HG00514_2_flye/assembly.2.fasta"]
+  "flye2" : ["/home/cmb-panasas2/mchaisso/HG00514_2_flye/assembly.1.fasta",
+        	 "/home/cmb-panasas2/mchaisso/HG00514_2_flye/assembly.2.fasta"]
     },
     "ref" : "/home/cmb-16/mjc/shared/references/hg38_noalts/indexes/lra/hg38.no_alts.fasta",
 
