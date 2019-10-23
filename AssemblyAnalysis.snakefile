@@ -39,6 +39,7 @@ cats +=["missed_slop", "found_slop"]
 
 rule all:
     input:
+        gapVCF="from_reads.vcf",
         lrasplit=expand("{asm}.{hap}/lra/split.fasta", asm=asms,hap=haps),
         lrabed=expand("{asm}.{hap}/lra/calls.bed", asm=asms, hap=haps),
         lrabedclust=expand("{asm}.{hap}/lra/calls.clust.bed", asm=asms, hap=haps),
@@ -58,7 +59,21 @@ rule all:
 
 #        mm2DipSVBed=expand("{asm}_dip/mm2/variants.sv.{op}.bed", asm=asms,op=ops),
 
- 
+rule CreateGapBed:
+    input:
+        reads=config["bam"]
+    output:
+        gapBed="readsvcf"
+    resources:
+        threads=16
+    params:
+        ref=config["ref"],
+        sample=config["sample"],
+        sd=SD
+    shell:"""
+{params.sd}/SamToVCF.py --ref {params.ref} --sample {params.sample} --
+lra align {params.ref} {input.reads} -t {resources.threads} -p s | {params.sd}/PrintGaps.py {params.ref} /dev/stdin > {output.gapBed}
+"""
 
 rule CombineOps:
     input:
@@ -74,7 +89,7 @@ rule CombOps:
     input:
         bed=expand("{{asm}}.{hap}/mm2/variants.clusters.bed",hap=haps)
     output:
-        mm2CombDip="{asm}_dip/mm2/variants.clustered.bed",
+A        mm2CombDip="{asm}_dip/mm2/variants.clustered.bed",
     shell:"""
 cat {input.bed} | bedtools sort | bedtools cluster -d 500 | bedtools groupby -c 8 -g 8 -o count -full > {output.mm2CombDip}
 """
