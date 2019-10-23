@@ -63,7 +63,7 @@ rule CreateGapBed:
     input:
         reads=config["bam"]
     output:
-        gapBed="readsvcf"
+        gapBed="from_reads.vcf"
     resources:
         threads=16
     params:
@@ -89,7 +89,7 @@ rule CombOps:
     input:
         bed=expand("{{asm}}.{hap}/mm2/variants.clusters.bed",hap=haps)
     output:
-A        mm2CombDip="{asm}_dip/mm2/variants.clustered.bed",
+        mm2CombDip="{asm}_dip/mm2/variants.clustered.bed",
     shell:"""
 cat {input.bed} | bedtools sort | bedtools cluster -d 500 | bedtools groupby -c 8 -g 8 -o count -full > {output.mm2CombDip}
 """
