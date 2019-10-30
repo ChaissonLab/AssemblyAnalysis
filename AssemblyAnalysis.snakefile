@@ -39,18 +39,21 @@ cats +=["missed_slop", "found_slop"]
 
 rule all:
     input:
-        gapVCF="from_reads.vcf",
+        gapVCF=expand("from_reads.{method}.vcf",method=methods),
+        gapBeds=expand("from_reads.{method}.{op}.bed",method=methods,op=ops),
         lrasplit=expand("{asm}.{hap}/lra/split.fasta", asm=asms,hap=haps),
         lrabed=expand("{asm}.{hap}/lra/calls.bed", asm=asms, hap=haps),
         lrabedclust=expand("{asm}.{hap}/lra/calls.clust.bed", asm=asms, hap=haps),
-        laraDipClust=expand("{asm}_dip/lra/variants.clustered.bed",asm=asms),
+        lraDipClust=expand("{asm}_dip/lra/variants.clustered.bed",asm=asms),
         lrabedop=expand("{asm}.{hap}/lra/variants.sv.{op}.bed", asm=asms, hap=haps, op=ops),
+        lrabedopSup=expand("{asm}.{hap}/lra/variants.sv.{op}.bed.{meth}.support", meth=methods, asm=asms, hap=haps, op=ops),
         sam=expand("{asm}.{hap}/lra/split.fasta.bam", asm=asms,hap=haps),
         mm2HapVcf=expand("{asm}.{hap}/mm2/variants.vcf", asm=asms, hap=haps),
         paf2bed=expand("{asm}.{hap}/mm2/aln.paf.bed", asm=asms,hap=haps),
         mm2HapVcfGz=expand("{asm}.{hap}/mm2/variants.vcf.bgz", asm=asms, hap=haps),
         mm2HapSVVcf=expand("{asm}.{hap}/mm2/variants.sv.vcf", asm=asms, hap=haps),
         mm2HapSVBed=expand("{asm}.{hap}/mm2/variants.sv.{op}.bed", asm=asms, hap=haps,op=ops),
+        mm2HapSVBedSup=expand("{asm}.{hap}/mm2/variants.sv.{op}.bed.{method}.support", method=methods,asm=asms, hap=haps,op=ops),
         mm2HapVcfToDip=expand("{asm}_dip/mm2/variants.vcf.gz", asm=asms,op=ops),
         mm2Comb=expand("{asm}.{hap}/mm2/variants.clusters.bed", asm=asms, hap=haps),
         mm2CombDip=expand("{asm}_dip/mm2/variants.clustered.bed", asm=asms, hap=haps),
@@ -59,11 +62,32 @@ rule all:
 
 #        mm2DipSVBed=expand("{asm}_dip/mm2/variants.sv.{op}.bed", asm=asms,op=ops),
 
-rule CreateGapBed:
+
+
+rule GetVariantSupport:
     input:
-        reads=config["bam"]
+        bed="{prefix}.{op}.bed",
+        sup="from_reads.{method}.{op}.bed"
     output:
-        gapBed="from_reads.vcf"
+        sup="{prefix}.{op}.bed.{method}.support"
+    resources:
+        threads=1
+    params:
+        ref=config["ref"],
+        sd=SD
+    shell:"""
+bedtools slop -g {params.ref}.fai -b 1000 -i {input.sup} | \
+  bedtools intersect -loj -a <( cut -f 1-5 {input.bed} ) -b stdin | \
+  bedtools groupby -c 10 -o collapse -full | \
+  {params.sd}/GetSVSupport.py > {output.sup}
+"""
+
+
+rule CreateChromVCF:
+    input:
+        reads=lambda wildcards: config["bam"][wildcards.method]
+    output:
+        vcf="gaps/{method}.{chrom}.gaps.vcf"
     resources:
         threads=16
     params:
@@ -71,8 +95,35 @@ rule CreateGapBed:
         sample=config["sample"],
         sd=SD
     shell:"""
-{params.sd}/SamToVCF.py --ref {params.ref} --sample {params.sample} --
-lra align {params.ref} {input.reads} -t {resources.threads} -p s | {params.sd}/PrintGaps.py {params.ref} /dev/stdin > {output.gapBed}
+mkdir -p gaps
+{params.sd}/SamToVCF.py --ref {params.ref} --sample {params.sample} --sam {input.reads} --minLength 50 --chrom {wildcards.chrom} > {output.vcf}
+"""
+
+rule CreateGapBed:
+    input:
+        vcfs=expand("gaps/{{method}}.{chrom}.gaps.vcf", chrom=allChroms)
+    output:
+        gapVcf="from_reads.{method}.vcf"
+    resources:
+        threads=16
+    params:
+        ref=config["ref"],
+        sample=config["sample"],
+        sd=SD
+    shell:"""
+grep "^#" {input.vcfs[0]} > {output.gapVcf}
+cat {input.vcfs} | grep -v "^#" >> {output.gapVcf}
+"""
+
+rule ChromVCFToBed:
+    input:
+        vcf="from_reads.{method}.vcf"
+    output:
+        bed=expand("from_reads.{{method}}.{op}.bed",op=ops)
+    params:
+        sd=SD
+    shell:"""
+{params.sd}/VcfToSplitBed.sh {input.vcf} {output.bed[1]} {output.bed[0]}
 """
 
 rule CombineOps:

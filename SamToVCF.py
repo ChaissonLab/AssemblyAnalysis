@@ -12,6 +12,7 @@ ap.add_argument("--bam", help="Input bam file", default=None)
 ap.add_argument("--ref", help="Input reference file", required=True)
 ap.add_argument("--sample", help="Sample", default="unknown")
 ap.add_argument("--minLength", help="Minimum length of variant", type=int, default=1)
+ap.add_argument("--chrom", help="Process this region.", default=None)
 args=ap.parse_args()
 
 sam=pysam.AlignmentFile(args.sam)
@@ -37,7 +38,7 @@ sys.stdout.write("""##INFO=<ID=QNAME,Number=1,Type=string,Description="Name of q
 #CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	{}
 """.format(args.sample))
 
-for aln in sam.fetch():
+for aln in sam.fetch(contig=args.chrom):
     refStart = aln.reference_start
     refEnd   = aln.reference_end
     refSeq   = ref.fetch(aln.reference_name, refStart, refEnd).upper()
@@ -52,7 +53,7 @@ for aln in sam.fetch():
         i+=1
     if i >= len(b):
         continue
-    sys.stderr.write("processing " + aln.query_name + "\n")
+
     while i < len(b):
 
         varPos=None
@@ -87,7 +88,7 @@ for aln in sam.fetch():
             varPos=lastRef
             queryPos=lastQuery+1
         elif b[i][0] == None and b[i][1] != None:
-
+            # starting a deletion
             startIndex=i
             delStart=lastRef
             while i < len(b) and b[i][0] == None and b[i][1] != None:
@@ -98,7 +99,7 @@ for aln in sam.fetch():
 
             readVarSeq=aln.seq[lastQuery]
             refVarSeq=refSeq[delStart-refStart:(lastRef+1)-refStart]
-            varPos=refStart
+            varPos=delStart
             queryPos=lastQuery+1
 
 
