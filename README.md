@@ -23,3 +23,7 @@ http://www-rcf.usc.edu/~mchaisso/hgsvg/phase2/flye2/assembly.1.fasta
 http://www-rcf.usc.edu/~mchaisso/hgsvg/phase2/flye2/assembly.2.fasta
 http://www-rcf.usc.edu/~mchaisso/hgsvg/phase2/tworuns/assembly.1.consensus.fasta
 http://www-rcf.usc.edu/~mchaisso/hgsvg/phase2/tworuns/assembly.2.consensus.fasta
+
+
+-- SV calls with support -- 
+http://www-rcf.usc.edu/~mchaisso/hgsvg/phase2/all_support.tgz
