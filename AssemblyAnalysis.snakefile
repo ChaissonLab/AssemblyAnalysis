@@ -47,6 +47,7 @@ rule all:
         lraDipClust=expand("{asm}_dip/lra/variants.clustered.bed",asm=asms),
         lrabedop=expand("{asm}.{hap}/lra/variants.sv.{op}.bed", asm=asms, hap=haps, op=ops),
         lrabedopSup=expand("{asm}.{hap}/lra/variants.sv.{op}.bed.{meth}.support", meth=methods, asm=asms, hap=haps, op=ops),
+        lrabedopSupComb=expand("{asm}.{hap}/lra/variants.sv.{op}.bed.support.combined", asm=asms, hap=haps, op=ops),
         sam=expand("{asm}.{hap}/lra/split.fasta.bam", asm=asms,hap=haps),
         mm2HapVcf=expand("{asm}.{hap}/mm2/variants.vcf", asm=asms, hap=haps),
         paf2bed=expand("{asm}.{hap}/mm2/aln.paf.bed", asm=asms,hap=haps),
@@ -54,6 +55,7 @@ rule all:
         mm2HapSVVcf=expand("{asm}.{hap}/mm2/variants.sv.vcf", asm=asms, hap=haps),
         mm2HapSVBed=expand("{asm}.{hap}/mm2/variants.sv.{op}.bed", asm=asms, hap=haps,op=ops),
         mm2HapSVBedSup=expand("{asm}.{hap}/mm2/variants.sv.{op}.bed.{method}.support", method=methods,asm=asms, hap=haps,op=ops),
+        mm2HapSVBedSupComb=expand("{asm}.{hap}/mm2/variants.sv.{op}.bed.support.combined", asm=asms, hap=haps,op=ops),
         mm2HapVcfToDip=expand("{asm}_dip/mm2/variants.vcf.gz", asm=asms,op=ops),
         mm2Comb=expand("{asm}.{hap}/mm2/variants.clusters.bed", asm=asms, hap=haps),
         mm2CombDip=expand("{asm}_dip/mm2/variants.clustered.bed", asm=asms, hap=haps),
@@ -82,6 +84,14 @@ bedtools slop -g {params.ref}.fai -b 1000 -i {input.sup} | \
   {params.sd}/GetSVSupport.py > {output.sup}
 """
 
+rule CombineVariantSupport:
+    input:
+        meth=expand("{{prefix}}.{{op}}.bed.{method}.support", method=methods),
+    output:
+        comb="{prefix}.{op}.bed.support.combined"
+    shell:"""
+paste {input.meth[0]} <( cut -f 6 {input.meth[1]} ) > {output.comb}
+"""
 
 rule CreateChromVCF:
     input:
