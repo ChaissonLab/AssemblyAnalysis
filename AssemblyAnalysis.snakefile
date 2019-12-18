@@ -198,7 +198,7 @@ rule LraClust:
     output:
         lrabed="{asm}.{hap}/lra/calls.clust.bed"
     shell:"""
-bedtools sort -header -i {input.bed} | \
+tail -n +2 {input.bed} | bedtools sort  | \
   bedtools cluster -d 500 | \
   bedtools groupby -g 11 -c 1,2,3,4,5,6,11 -o first,min,max,collapse,collapse,collapse,count | \
   cut -f 2- | \

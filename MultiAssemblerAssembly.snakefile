@@ -62,6 +62,7 @@ rule RunAssembly:
 mkdir -p {params.wd}
 cp {input.json} {params.wd}/
 pushd {params.wd} && snakemake -p -s {params.pd}/PartitionedAssembly.snakefile  -j {params.jobs_per_run} --cluster " {{params.grid_opts}} -c {{resources.threads}} --mem={{resources.mem_gb}}G {{params.node_constraint}} "  --restart-times 4  && popd
-cp {params.wd}/run/assembly.*.consensus.fasta {wildcards.dataset}/{wildcards.assembler}/
+cp {params.wd}/assembly.*.consensus.fasta {wildcards.dataset}/{wildcards.assembler}/
+rm -rf {params.wd}/
 
 """
