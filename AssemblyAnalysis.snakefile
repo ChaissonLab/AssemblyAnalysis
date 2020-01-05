@@ -36,9 +36,10 @@ methods=["lra", "mm2"]
 ops=["ins", "del"]
 cats=["missed", "found"]
 cats +=["missed_slop", "found_slop"]
+checks=["passed","failed"]
 samples=config["sample"]
 
-localrules:CollectStats,CompareToSVSet,GetVariantSupport,CombineVariantSupport,ChromVCFToBed,CombineOps,CombOps,SplitFasta,LraBed,LraClust,LraClustDip,SplitLrabed
+localrules:CheckResults,CollectStats,CombineStats,CompareToSVSet,GetVariantSupport,CombineVariantSupport,ChromVCFToBed,CombineOps,CombOps,SplitFasta,LraBed,LraClust,LraClustDip,SplitLrabed
 
 rule all:
     input:
@@ -64,8 +65,10 @@ rule all:
         mm2Comb=expand("{asm}.{hap}/mm2/variants.clusters.bed", asm=asms, hap=haps),
         mm2CombDip=expand("{asm}_dip/mm2/variants.clustered.bed", asm=asms, hap=haps),
         comparison=expand("{asm}_dip/{meth}/variants.sv.{op}.{cat}.bed", asm=asms, op=ops+["hap"], cat=cats, meth=methods),
-        stats=expand("run_stats.txt", asm=asms, hap=haps, meth=methods)
-
+        filter=expand("{asm}.{hap}/{meth}/sv.{check}.bed", asm=asms, hap=haps, meth=methods, check=checks),
+        stats=expand("statistics/{asm}.{hap}.stats.txt", asm=asms, hap=haps),
+        statsAll="statistics/run_stats_all.txt"
+        
 #        mm2DipSVBed=expand("{asm}_dip/mm2/variants.sv.{op}.bed", asm=asms,op=ops),
 
 
@@ -83,8 +86,8 @@ rule GetVariantSupport:
         sd=SD
     shell:"""
 bedtools slop -g {params.ref}.fai -b 1000 -i {input.sup} | \
-  bedtools intersect -loj -a <( cut -f 1-5 {input.bed} ) -b stdin | \
-  bedtools groupby -c 10 -o collapse -full | \
+  bedtools intersect -loj -a <( cut -f 1-6 {input.bed} ) -b stdin | \
+  bedtools groupby -c 11 -o collapse -full | \
   {params.sd}/GetSVSupport.py > {output.sup}
 """
 
@@ -94,7 +97,7 @@ rule CombineVariantSupport:
     output:
         comb="{prefix}.{op}.bed.support.combined"
     shell:"""
-paste {input.meth[0]} <( cut -f 6 {input.meth[1]} ) > {output.comb}
+paste {input.meth[0]} <( cut -f 7 {input.meth[1]} ) > {output.comb}
 """
 
 rule CreateChromVCF:
@@ -148,8 +151,8 @@ rule CombineOps:
     output:
         bed="{asm}.{hap}/mm2/variants.clusters.bed"
     shell:"""
-cat {input.opBed} | bedtools cluster -d 500 | bedtools groupby -g 7 -c 1,2,3,4,5,6,7 -o first,min,max,collapse,collapse,collapse,count | cut -f 2- | \
-awk '{{ if (index($6,"deletion") > 0 && index($6,"insertion") > 0) {{ $6="locus";}} else {{ if (index($6,"deletion") == 0) {{ $6="insertion"; }} else {{ $6="deletion";}} }} print; }}' | tr " " "\\t"  > {output.bed}
+cat {input.opBed} | bedtools cluster -d 500 | bedtools groupby -g 8 -c 1,2,3,4,5,6,7,8 -o first,min,max,collapse,max,collapse,collapse,count | cut -f 2- | \
+awk '{{ if (index($4,"deletion") > 0 && index($4,"insertion") > 0) {{ $4="locus";}} else {{ if (index($4,"deletion") == 0) {{ $4="insertion"; }} else {{ $4="deletion";}} }} print; }}' | tr " " "\\t"  > {output.bed}
 """
 
 rule CombOps:
@@ -158,7 +161,7 @@ rule CombOps:
     output:
         mm2CombDip="{asm}_dip/mm2/variants.clustered.bed",
     shell:"""
-cat {input.bed} | bedtools sort | bedtools cluster -d 500 | bedtools groupby -c 8 -g 8 -o count -full > {output.mm2CombDip}
+cat {input.bed} | bedtools sort | bedtools cluster -d 500 | bedtools groupby -c 9 -g 9 -o count -full > {output.mm2CombDip}
 """
 rule SplitFasta:
     input:
@@ -353,65 +356,54 @@ rule SVVCFToBed:
 
 
 grep -v "^#" {input.vcf} | awk '{{ a=length($4); b=length($5); diff=a-b; {{if (diff <= 0) {{oper="insertion"; diff*= -1}} else {{oper="deletion"}};\
-                                 print $1,$2,$2+diff,$4,$5,oper; !keep[$1,$2,$3,$6]++}} }}' OFS="\t" | bedtools sort > {output.bed} 
+                                 print $1,$2,$2+diff,oper,diff,$4,$5; !keep[$1,$2,$3,$4]++}} }}' OFS="\t" | bedtools sort > {output.bed} 
 
-cat {output.bed} | awk '{{if ($6 == "insertion") {{print}}  }}'  >  {wildcards.asm}.{wildcards.hap}/mm2/variants.sv.ins.bed
-cat {output.bed} | awk '{{if ($6 == "deletion")  {{print}}  }}'  >  {wildcards.asm}.{wildcards.hap}/mm2/variants.sv.del.bed
+cat {output.bed} | awk '{{if ($4 == "insertion") {{print $1,$2,$3,$4,$5,$7}}  }}' OFS="\t" >  {wildcards.asm}.{wildcards.hap}/mm2/variants.sv.ins.bed
+cat {output.bed} | awk '{{if ($4 == "deletion")  {{print $1,$2,$3,$4,$5,$6}}  }}' OFS="\t" >  {wildcards.asm}.{wildcards.hap}/mm2/variants.sv.del.bed
+"""
+rule CheckResults:
+    input:
+        sup=expand("{{asm}}.{{hap}}/{{meth}}/variants.sv.{op}.bed.support.combined",op=ops)
+    output:
+        failed="{asm}.{hap}/{meth}/sv.failed.bed",
+        passed="{asm}.{hap}/{meth}/sv.passed.bed"
+    shell:"""
+
+cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 < 3 && $8 < 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > {output.failed}
+cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 >= 3 || $8 >= 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > {output.passed}
 """
 
 rule CollectStats:
     input:
-         asm=expand("{asm}.{hap}/assembly.fasta.fai",asm=asms,hap=haps),
-         covL=expand("{asm}.{hap}/lra/split.fasta.bam",asm=asms,hap=haps),
-         covM=expand("{asm}.{hap}/mm2/aln.paf",asm=asms,hap=haps),
-         varL=expand("{asm}.{hap}/lra/calls.bed",asm=asms,hap=haps),
-         varM=expand("{asm}.{hap}/mm2/variants.sv.bed",asm=asms,hap=haps),
-         sup=expand("{asm}.{hap}/{meth}/variants.sv.{op}.bed.support.combined",asm=asms,hap=haps,meth=methods,op=ops)
+        asm="{asm}.{hap}/assembly.fasta.fai",
+        covM="{asm}.{hap}/mm2/aln.paf.bed",
+        covL="{asm}.{hap}/lra/split.fasta.bam",
+        varM="{asm}.{hap}/mm2/variants.sv.bed",
+        varL="{asm}.{hap}/lra/calls.bed",
+        sup=expand("{{asm}}.{{hap}}/{meth}/sv.passed.bed", meth=methods) 
     output:
-        stats="run_stats.txt",
-        false="falsePosAll.bed"
+        stats="statistics/{asm}.{hap}.stats.txt",
     params:
         ref=config["ref"]
     shell:"""
 
-echo -e "Assembly\tmm2SVs\tlraSVs" > {output.stats}
-for inpM in {input.varM}; do wc -l $inpM | awk '{{split($2, arr, "/") ; assemb=arr[1] ; print assemb,$1,"."}}' OFS="\t" >> {output.stats}  ; done
-for inpL in {input.varL}; do svCount=$(cat $inpL | wc -l) ; asmName=$(echo $inpL | cut -d'/' -f1) ;\
-                          cat {output.stats} | awk -v count="$svCount" -v name="$asmName" '{{if ($1 == name) {{ print $1,$2,count}} else {{print $0}}  }}' OFS="\t" \
-                          > {output.stats}.tmp && mv -f {output.stats}.tmp {output.stats} ; done
-cp {output.stats} {output.stats}.tmp ; echo "" > {output.false}
-for inpS in {input.sup};  do supCount=$(cat $inpS | awk '{{if ($6 >= 3 || $7 >= 3) {{print}} }}' | wc -l) ; asmName=$(echo $inpS | cut -d'/' -f1) ;\
-                          methName=$(echo $inpS | cut -d'/' -f2) ; opName=$(echo $inpS | cut -d'/' -f3 | cut -d'.' -f3) ;\
-                          cat $inpS | awk -v name="$asmName" -v opr="$opName" -v met="$methName" '{{if ($6 < 3 && $7 < 3) {{print $1,$2,$3,name"/"met"/"opr}} }}' OFS="\t" >> {output.false} ;\
-                          cat {output.stats}.tmp | awk -v count="$supCount" -v name="$asmName" -v met="$methName" -v opr="$opName"\
-                          '{{if($1 == name)    {{if (met == "mm2" && opr == "ins") {{print $1,count,$3,$4,$5}}\
-                                                 else if(met == "mm2" && opr == "del") {{print $1,$2,count,$4,$5}}\
-                                                 else if(met == "lra" && opr == "ins") {{print $1,$2,$3,count,$5}}\
-                                                 else if(met == "lra" && opr == "del") {{print $1,$2,$3,$4,count}} }} \
-                                                 else {{print}} }}' OFS="\t" \
-                                                 > {output.stats}.tmp.tmp && mv -f {output.stats}.tmp.tmp {output.stats}.tmp ; done
-cat {output.stats}.tmp | awk 'BEGIN{{print "mm2Sup\tlraSup"}} NR>1 {{print $2+$3,$4+$5}}' OFS="\t" | paste {output.stats} - \
-                          > {output.stats}.tmp.tmp && mv -f {output.stats}.tmp.tmp {output.stats} && rm -f {output.stats}.tmp 
-cp {output.stats} {output.stats}.tmp
-for inpM in {input.covM}; do breadth=$(bedtools genomecov -i $inpM.bed -g {params.ref}.fai | awk '{{if ($1=="genome" && $2>0) {{count += $5}}}} END {{print count}}') ; asmName=$(echo $inpM | cut -d'/' -f1) ;\
-                          cat {output.stats}.tmp | awk -v brdth="$breadth" -v name="$asmName" \
-                          '{{if($1 == name) {{print $1, brdth}} else {{print}} }}' OFS="\t"\
-                          > {output.stats}.tmp.tmp && mv -f {output.stats}.tmp.tmp {output.stats}.tmp ; done
-cat {output.stats}.tmp | awk 'BEGIN{{print "mm2BrdthCov"}} NR>1 {{print $2}}' OFS="\t" | paste {output.stats} - \
-                          > {output.stats}.tmp.tmp && mv -f {output.stats}.tmp.tmp {output.stats} && rm -f {output.stats}.tmp
-cp {output.stats} {output.stats}.tmp
-for inpL in {input.covL}; do breadth=$(bedtools genomecov -ibam $inpL | awk '{{if ($1=="genome" && $2>0) {{count += $5}}}} END {{print count}}') ; asmName=$(echo $inpL | cut -d'/' -f1) ;\
-                          cat {output.stats}.tmp | awk -v brdth="$breadth" -v name="$asmName" \
-                          '{{if($1 == name) {{print $1, brdth}} else {{print}} }}' OFS="\t"\
-                          > {output.stats}.tmp.tmp && mv -f {output.stats}.tmp.tmp {output.stats}.tmp ; done
-cat {output.stats}.tmp | awk 'BEGIN{{print "lraBrdthCov"}} NR>1 {{print $2}}' OFS="\t" | paste {output.stats} - \
-                          > {output.stats}.tmp.tmp && mv -f {output.stats}.tmp.tmp {output.stats} && rm -f {output.stats}.tmp
+halfGnm=$(cat {params.ref}.fai | awk '{{size += $2}} END {{print int(size/2)}}')
 
-echo "N50" > {output.stats}.tmp.tmp
-cp {output.stats} {output.stats}.tmp
-for assemb in {input.asm}; do gnmSize=$(cat {params.ref}.fai | awk '{{size += $2}} END {{print int(size/2)}}') ; sort -nr -k 2 $assemb | awk -v gnm="$gnmSize" \
-                          'BEGIN{{contgSum=0}} {{contgSum += $2 ; if(contgSum >= gnm) {{print $2}} }}' > tmp ; head -n 1 tmp >> {output.stats}.tmp.tmp ; done ; paste {output.stats}.tmp {output.stats}.tmp.tmp \
-                          > {output.stats} ; rm -f {output.stats}.tmp {output.stats}.tmp.tmp tmp
+n50=$(sort -nr -k 2 {input.asm} | awk -v gnm="$halfGnm" '{{contgSum += $2 ; if(contgSum >= gnm) {{print $2}} }} END{{if(contgSum < gnm) {{print "notFound"}} }}' > {output.stats}.tmp ; head -n 1 {output.stats}.tmp) && rm -f {output.stats}.tmp
+covM=$(bedtools genomecov -i {input.covM} -g {params.ref}.fai | awk '{{if ($1=="genome" && $2>0) {{count += $5}} }} END {{print count}}')
+covL=$(bedtools genomecov -ibam {input.covL} | awk '{{if ($1=="genome" && $2>0) {{count += $5}} }} END {{print count}}')
 
+echo -e "Assembly\tN50\tmm2BrdthCov\tlraBrdthCov\tmm2SVs\tlraSVs\tmm2Sup\tlraSup" > {output.stats}
+echo -e "{wildcards.asm}.{wildcards.hap}\t$n50\t$covM\t$covL\t$(cat {input.varM} | wc -l)\t$(cat {input.varL} | wc -l)\t$(cat {input.sup[0]} | wc -l)\t$(cat {input.sup[1]} | wc -l)" >> {output.stats}
+"""
 
+rule CombineStats:
+    input:
+        stats=expand("statistics/{asm}.{hap}.stats.txt",asm=asms,hap=haps)
+    output:
+        all="statistics/run_stats_all.txt"
+    shell:"""
+
+echo -e "Assembly\tN50\tmm2BrdthCov\tlraBrdthCov\tmm2SVs\tlraSVs\tmm2Sup\tlraSup" > {output.all}
+for inpStat in {input.stats}; do cat $inpStat | tail -n 1 >> {output.all} ; done
 """
