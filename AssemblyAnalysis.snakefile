@@ -39,7 +39,9 @@ cats +=["missed_slop", "found_slop"]
 checks=["passed","failed"]
 samples=config["sample"]
 
-localrules:CheckResults,CollectStats,CombineStats,CompareToSVSet,GetVariantSupport,CombineVariantSupport,ChromVCFToBed,CombineOps,CombOps,SplitFasta,LraBed,LraClust,LraClustDip,SplitLrabed
+
+
+localrules:FindAvgCov,CheckResults,CollectStats,CombineStats,CompareToSVSet,GetVariantSupport,CombineVariantSupport,ChromVCFToBed,CombineOps,CombOps,SplitFasta,LraBed,LraClust,LraClustDip,SplitLrabed
 
 rule all:
     input:
@@ -65,13 +67,10 @@ rule all:
         mm2Comb=expand("{asm}.{hap}/mm2/variants.clusters.bed", asm=asms, hap=haps),
         mm2CombDip=expand("{asm}_dip/mm2/variants.clustered.bed", asm=asms, hap=haps),
         comparison=expand("{asm}_dip/{meth}/variants.sv.{op}.{cat}.bed", asm=asms, op=ops+["hap"], cat=cats, meth=methods),
-        filter=expand("{asm}.{hap}/{meth}/sv.{check}.bed", asm=asms, hap=haps, meth=methods, check=checks),
-        stats=expand("statistics/{asm}.{hap}.stats.txt", asm=asms, hap=haps),
-        statsAll="statistics/run_stats_all.txt"
-        
-#        mm2DipSVBed=expand("{asm}_dip/mm2/variants.sv.{op}.bed", asm=asms,op=ops),
-
-
+        filtered=expand("{asm}.{hap}/{meth}/sv.{check}.bed", asm=asms, hap=haps, meth=methods, check=checks),
+        stats=expand("{asm}.{hap}/stats.txt", asm=asms, hap=haps),
+        findCov=expand("coverage/{method}.txt", method=methods),
+        statsAll="run_stats_all.txt"
 
 rule GetVariantSupport:
     input:
@@ -100,6 +99,16 @@ rule CombineVariantSupport:
 paste {input.meth[0]} <( cut -f 7 {input.meth[1]} ) > {output.comb}
 """
 
+rule FindAvgCov:
+    input:
+        reads=lambda wildcards: config["bam"][wildcards.method]
+    output:
+        cov="coverage/{method}.txt"
+    shell:"""
+mkdir -p coverage
+samtools coverage {input.reads} > {output.cov}
+"""
+
 rule CreateChromVCF:
     input:
         reads=lambda wildcards: config["bam"][wildcards.method]
@@ -114,7 +123,7 @@ rule CreateChromVCF:
         sd=SD
     shell:"""
 mkdir -p gaps
-{params.sd}/SamToVCF.py --ref {params.ref} --sample {params.sample} --sam {input.reads} --minLength 50 --chrom {wildcards.chrom} > {output.vcf}
+{params.sd}/SamToVCF.py --ref {params.ref} --sample {params.sample} --sam {input.reads} --minLength 25 --chrom {wildcards.chrom} > {output.vcf}
 """
 
 rule CreateGapBed:
@@ -173,7 +182,7 @@ rule SplitFasta:
         splitSize=500000,
         sd=SD
     shell:"""
-ln -s {input.asm} {wildcards.asm}.{wildcards.hap}/assembly.fasta && samtools faidx {wildcards.asm}.{wildcards.hap}/assembly.fasta && rm {wildcards.asm}.{wildcards.hap}/assembly.fasta
+ln -sfn {input.asm} {wildcards.asm}.{wildcards.hap}/assembly.fasta && samtools faidx {wildcards.asm}.{wildcards.hap}/assembly.fasta && rm -f {wildcards.asm}.{wildcards.hap}/assembly.fasta
 
 mkdir -p {wildcards.asm}.{wildcards.hap}/lra
 {params.sd}/SplitFasta.py {input.asm} {params.splitSize} > {output.split}
@@ -184,11 +193,15 @@ rule MapSplitFasta:
         split="{asm}.{hap}/lra/split.fasta"
     output:
         sam="{asm}.{hap}/lra/split.fasta.bam"
+    resources:
+        threads=4
     params:
         ref=config["ref"],
-        grid_opts=config["grid_large"]
+        grid_opts=config["grid_memory"]
     shell:"""
-lra align {params.ref} {input.split} -t 8 -p s | \
+readType=$(echo {wildcards.asm} | grep -o '[^_]*$')
+if [ $readType == "ONT" ] ; then readType="NANO" ; fi
+/home/cmb-16/mjc/mchaisso/projects/LRA/lra align {params.ref} {input.split} -$readType -t 16 -p s | \
  samtools sort -@2 -T $TMPDIR/$$  -o {output.sam}
 samtools index {output.sam}
 
@@ -363,14 +376,21 @@ cat {output.bed} | awk '{{if ($4 == "deletion")  {{print $1,$2,$3,$4,$5,$6}}  }}
 """
 rule CheckResults:
     input:
-        sup=expand("{{asm}}.{{hap}}/{{meth}}/variants.sv.{op}.bed.support.combined",op=ops)
+        sup=expand("{{asm}}.{{hap}}/{{meth}}/variants.sv.{op}.bed.support.combined",op=ops),
+        reads=lambda wildcards: config["bam"][wildcards.meth],
+        cov="coverage/{meth}.txt",
     output:
         failed="{asm}.{hap}/{meth}/sv.failed.bed",
         passed="{asm}.{hap}/{meth}/sv.passed.bed"
     shell:"""
 
+avgCov=$(cat {input.cov} | awk '{{ total += $7 }} END {{ print total/NR }}')
+
 cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 < 3 && $8 < 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > {output.failed}
-cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 >= 3 || $8 >= 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > {output.passed}
+cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 >= 3 || $8 >= 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > tmp.{wildcards.asm}.{wildcards.meth}.{wildcards.hap}.passed
+
+cat tmp.{wildcards.asm}.{wildcards.meth}.{wildcards.hap}.passed | awk -v avg="$avgCov"\
+                      '{{ cmd="samtools coverage -r "$1":"$2"-"$3" {input.reads} | tail -n1 | cut -f7"; cmd | getline localCov ; if(localCov < 2*avg) {{print}} }}' OFS="\t" > {output.passed} && rm -f tmp.{wildcards.asm}.{wildcards.meth}.{wildcards.hap}.passed
 """
 
 rule CollectStats:
@@ -382,7 +402,7 @@ rule CollectStats:
         varL="{asm}.{hap}/lra/calls.bed",
         sup=expand("{{asm}}.{{hap}}/{meth}/sv.passed.bed", meth=methods) 
     output:
-        stats="statistics/{asm}.{hap}.stats.txt",
+        stats="{asm}.{hap}/stats.txt",
     params:
         ref=config["ref"]
     shell:"""
@@ -394,14 +414,14 @@ covM=$(bedtools genomecov -i {input.covM} -g {params.ref}.fai | awk '{{if ($1=="
 covL=$(bedtools genomecov -ibam {input.covL} | awk '{{if ($1=="genome" && $2>0) {{count += $5}} }} END {{print count}}')
 
 echo -e "Assembly\tN50\tmm2BrdthCov\tlraBrdthCov\tmm2SVs\tlraSVs\tmm2Sup\tlraSup" > {output.stats}
-echo -e "{wildcards.asm}.{wildcards.hap}\t$n50\t$covM\t$covL\t$(cat {input.varM} | wc -l)\t$(cat {input.varL} | wc -l)\t$(cat {input.sup[0]} | wc -l)\t$(cat {input.sup[1]} | wc -l)" >> {output.stats}
+echo -e "{wildcards.asm}.{wildcards.hap}\t$n50\t$covM\t$covL\t$(cat {input.varM} | wc -l)\t$(cat {input.varL} | wc -l)\t$(cat {input.sup[1]} | wc -l)\t$(cat {input.sup[0]} | wc -l)" >> {output.stats}
 """
 
 rule CombineStats:
     input:
-        stats=expand("statistics/{asm}.{hap}.stats.txt",asm=asms,hap=haps)
+        stats=expand("{asm}.{hap}/stats.txt",asm=asms,hap=haps)
     output:
-        all="statistics/run_stats_all.txt"
+        all="run_stats_all.txt"
     shell:"""
 
 echo -e "Assembly\tN50\tmm2BrdthCov\tlraBrdthCov\tmm2SVs\tlraSVs\tmm2Sup\tlraSup" > {output.all}
