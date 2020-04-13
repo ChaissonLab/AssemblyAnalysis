@@ -39,9 +39,9 @@ ops=["ins", "del"]
 cats=["missed", "found"]
 cats +=["missed_slop", "found_slop"]
 checks=["passed","failed"]
+flags=["1", "2", "3"] #Current number of filtering flags
 
-
-localrules:IndexAssembly,FindAvgCov,MakeBed,SplitBed,CombineStats,CompareToSVSet,CombineVariantSupport,CombineChroms,ReadVCFToBed,ClusterBed,ClusterDiploid
+localrules:IndexAssembly,FindAvgCov,MakeBed,SplitBed,GetVariantSupport,FlagCentromere,FlagUnsupported,FlagHighCoverage,CollectFlagStats,CollectRunStats,CombineRunStats,CombineFlagStats,CompareToSVSet,CombineVariantSupport,CombineChroms,ReadVCFToBed,ClusterBed,ClusterDiploid
 
 rule all:
     input:
@@ -57,8 +57,10 @@ rule all:
         comparison=expand("{asm}_dip/{method}/variants.sv.{op}.{cat}.bed",asm=asms,method=methods,op=ops+["hap"],cat=cats),
         filtered=expand("{asm}.{hap}/{method}/sv.{check}.bed",asm=asms,hap=haps,method=methods,check=checks),
         findCov=expand("coverage/{method}.txt",method=methods),
-        statsAsm=expand("{asm}.{hap}/stats.txt",asm=asms,hap=haps),
-        statsAll="run_stats_all.txt"
+        statsAsm=expand("{asm}.{hap}/{method}/stats.txt",asm=asms,hap=haps,method=methods),
+        statsAsmFlags=expand("{asm}.{hap}/{method}/stats_flag.txt",asm=asms,hap=haps,method=methods),
+        statsAll="run_stats_all.txt",
+        statsAllFlags="run_stats_all_flags.txt"
 
 
 rule IndexAssembly:
@@ -78,7 +80,7 @@ rule FindAvgCov:
         cov="coverage/{method}.txt"
     shell:"""
 mkdir -p coverage
-samtools coverage {input.reads} > {output.cov}
+samtools coverage -H {input.reads} > {output.cov}
 """
 
 #
@@ -98,11 +100,10 @@ rule MapFasta:
     shell:"""
 mkdir -p {wildcards.asm}.{wildcards.hap}/{wildcards.method}
 
-if [ {wildcards.method} == "mm2" ] ; then \
-   minimap2 -t 4 -ax asm5 --cs {params.ref} {input.asm} | samtools view -h -b - ; \
-elif [ {wildcards.method} == "lra" ] ; then \
-   /home/cmb-16/mjc/mchaisso/projects/LRA/lra align {params.ref} {input.asm} -{params.readType} -t 4 -p s ; fi | \
-   samtools sort -@2 -T $TMPDIR/$$  -o {output.bam}
+if [ {wildcards.method} == mm2 ] ; then \
+   minimap2 -t 4 -ax asm10 --cs {params.ref} {input.asm} | samtools view -h -b - ; \
+elif [ {wildcards.method} == lra ] ; then \
+   lra align -{params.readType} -t 4 {params.ref} {input.asm} -p s ; fi | samtools sort -@2 -T $TMPDIR/$$  -o {output.bam}
 
 samtools index {output.bam}
 """
@@ -121,13 +122,14 @@ rule MakeBed:
     shell:"""
 
 samtools view -h {input.bam} | \
-   if [ {wildcards.method} == "mm2" ] ; then \
+   if [ {wildcards.method} == mm2 ] ; then \
      paftools.js sam2paf - | sort -k6,6 -k8,8n | paftools.js call -f {params.ref} - | \
      grep -v "^#" | awk '{{diff=length($4)-length($5); if (diff <= -50 || diff >= 50) {{ \
                          if (diff <= 0) {{oper="insertion"; diff*= -1}} else {{oper="deletion"}}; \
                          print $1,$2,$2+diff,oper,diff,$4,$5}} }}' OFS="\t"; \
-   elif [ {wildcards.method} == "lra" ] ; then \
-     {params.sd}/PrintGaps.py {params.ref} /dev/stdin | tail -n +2 | cut -f1-7 ; fi > {output.bed}
+   elif [ {wildcards.method} == lra ] ; then \
+     {params.sd}/PrintGaps.py {params.ref} /dev/stdin | tail -n +2 | cut -f1-7 ; fi |\
+   awk -F " " '!keep[$1,$2,$3,$4]++' OFS="\t" | bedtools sort > {output.bed}
 """
 
 #
@@ -141,8 +143,7 @@ rule SplitBed:
     shell:"""
 beds[0]={output.split[0]} ; beds[1]={output.split[1]}
 oper=(insertion deletion) ; for op in {{0..1}} ; do egrep "^#|${{oper[$op]}}" {input.bed} | \
-       awk 'function max(x, y) {{return length(x) > length(y) ? x: y}} {{print $1,$2,$3,$4,$5,max($6,$7); \
-       !keep[$1,$2,$3,$4]++}}' OFS="\t" | bedtools sort > ${{beds[$op]}}; done
+       awk 'function max(x, y) {{return length(x) > length(y) ? x: y}} {{print $1,$2,$3,$4,$5,max($6,$7)}}' OFS="\t" > ${{beds[$op]}}; done
 """
 
 #
@@ -260,62 +261,123 @@ paste {input.meth[0]} <( cut -f 7 {input.meth[1]} ) > {output.comb}
 #
 #Step 7: Filter false-positives out of the set of SVs called from the assembly
 #
-rule CheckResults:
+rule FlagCentromere:
+    input:
+        sup=expand("{{asm}}.{{hap}}/{{meth}}/variants.sv.{op}.bed.support.combined",op=ops)
+    output:
+        euchr="{asm}.{hap}/{meth}/sv.flag.1.bed"
+    params:
+        grid_opts=config["grid_small"]
+    shell:"""
+
+bedtools intersect -c -a <(cat {input.sup}) -b /home/cmb-16/mjc/shared/references/hg38/regions/cytobands/hg38.heterochromatic.bed | awk '{{if ($9 > 0) print $0,1 ; else print $0,0}}' OFS="\t" > {output.euchr}
+"""
+
+rule FlagHighCoverage:
     input:
         sup=expand("{{asm}}.{{hap}}/{{meth}}/variants.sv.{op}.bed.support.combined",op=ops),
         reads=lambda wildcards: config["bam"][wildcards.meth],
         cov="coverage/{meth}.txt",
     output:
-        failed="{asm}.{hap}/{meth}/sv.failed.bed",
-        passed="{asm}.{hap}/{meth}/sv.passed.bed"
+        hcov="{asm}.{hap}/{meth}/sv.flag.2.bed"
     params:
         grid_opts=config["grid_small"]
     shell:"""
 
-avgCov=$(cat {input.cov} | awk '{{ total += $7 }} END {{ print total/NR }}')
+avgCov=$(cat {input.cov} | awk '{{ total+=$7 }} END {{ print total/NR }}')
 
-cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 < 3 && $8 < 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > {output.failed}
-cat {input.sup} | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($7 >= 3 || $8 >= 3) {{print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$7,$8 }} }}' OFS="\t" > tmp.{wildcards.asm}.{wildcards.meth}.{wildcards.hap}.passed
+samtools bedcov <(cat {input.sup}) {input.reads} | awk -v avg=$avgCov '{{if ($9/$5 > 2*avg) print $0,1 ; else print $0,0}}' OFS="\t" > {output.hcov}
+"""
 
-cat tmp.{wildcards.asm}.{wildcards.meth}.{wildcards.hap}.passed | awk -v avg="$avgCov"\
-                      '{{ cmd="samtools coverage -r "$1":"$2"-"$3" {input.reads} | tail -n1 | cut -f7"; cmd | getline localCov ; if(localCov < 2*avg) {{print}} }}' OFS="\t" > {output.passed} && rm -f tmp.{wildcards.asm}.{wildcards.meth}.{wildcards.hap}.passed
+rule FlagUnsupported:
+    input:
+        sup=expand("{{asm}}.{{hap}}/{{meth}}/variants.sv.{op}.bed.support.combined",op=ops)
+    output:
+        unsup="{asm}.{hap}/{meth}/sv.flag.3.bed"
+    params:
+        grid_opts=config["grid_small"]
+    shell:"""
+
+cat {input.sup} | awk '{{if ($7 < 3 && $8 < 3) print $0,1 ; else print $0,0}}' OFS="\t" > {output.unsup}
+"""
+
+rule CheckFlags:
+    input:
+        flagged=expand("{{asm}}.{{hap}}/{{meth}}/sv.flag.{flag}.bed",flag=flags)
+    output:
+        filtered=expand("{{asm}}.{{hap}}/{{meth}}/sv.{check}.bed",check=checks)
+    params:
+        grid_opts=config["grid_small"]
+    shell:"""
+
+touch {output.filtered}
+
+paste {input.flagged[0]} <( cut -f 10 {input.flagged[1]} ) <( cut -f 9 {input.flagged[2]} ) | awk -v asm="{wildcards.asm}" -v meth="{wildcards.meth}" -v hap="{wildcards.hap}" '{{if ($10+$11+$12 == 0) print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6 > "{output.filtered[0]}" ; else print $1,$2,$3,asm"."hap"/"meth"/"$4,$5,$6,$10,$11,$12 > "{output.filtered[1]}"; }}' OFS="\t"
 """
 
 #
 #Step 8: Collect statistics on this run of the pipeline
 #
-rule CollectStats:
+rule CollectRunStats:
     input:
         asm="indices/{asm}.{hap}.assembly.fasta.fai",
-        covs=expand("{{asm}}.{{hap}}/{method}/aln.bam", method=methods),
-        vars=expand("{{asm}}.{{hap}}/{method}/variants.sv.bed", method=methods),
-        sups=expand("{{asm}}.{{hap}}/{method}/sv.passed.bed", method=methods) 
+        covs="{asm}.{hap}/{method}/aln.bam"
     output:
-        stats="{asm}.{hap}/stats.txt",
+        stats="{asm}.{hap}/{method}/stats.txt"
     params:
         grid_opts=config["grid_small"],
         ref=config["ref"]
     shell:"""
-covFiles[0]={input.covs[0]};covFiles[1]={input.covs[1]} ; varFiles[0]={input.vars[0]};varFiles[1]={input.vars[1]} ; supFiles[0]={input.sups[0]};supFiles[1]={input.sups[1]}
 
 halfGnm=$(cat {params.ref}.fai | awk '{{size += $2}} END {{print int(size/2)}}')
 
-n50=$(sort -nr -k 2 {input.asm} | awk -v gnm="$halfGnm" '{{contgSum += $2 ; if(contgSum >= gnm) {{print $2}} }} END{{if(contgSum < gnm) {{print "notFound"}} }}' \ 
-    > {output.stats}.tmp ; head -n 1 {output.stats}.tmp) && rm -f {output.stats}.tmp
-for i in {{0..1}} ; do covs[$i]=$(bedtools genomecov -ibam ${{covFiles[$i]}} | awk '{{if ($1=="genome" && $2>0) {{count += $5}} }} END {{print count}}') ; done
-for i in {{0..1}} ; do vars[$i]=$(cat ${{varFiles[$i]}} | wc -l) ; done
-for i in {{0..1}} ; do sups[$i]=$(cat ${{supFiles[$i]}} | wc -l) ; done
-echo -e "Assembly\tN50\tmm2BasesCov\tlraBasesCov\tmm2SVs\tlraSVs\tmm2Sup\tlraSup" > {output.stats}
-echo -e "{wildcards.asm}.{wildcards.hap}\t$n50\t${{covs[1]}}\t${{covs[0]}}\t${{vars[1]}}\t${{vars[0]}}\t${{sups[1]}}\t${{sups[0]}}" >> {output.stats}
+n50=$(sort -nr -k 2 {input.asm} | awk -v gnm="$halfGnm" '{{contgSum += $2 ; if(contgSum >= gnm) {{print $2}} }} END{{if(contgSum < gnm) {{print "notFound"}} }}' > {output.stats}.tmp ; head -n 1 {output.stats}.tmp) && rm -f {output.stats}.tmp
+
+cov=$(samtools coverage -H {input.covs} | awk '{{count+=$5; total+=$3}} END {{print count/total}}')
+
+echo -e "{wildcards.method}.{wildcards.asm}.{wildcards.hap}\t$n50\t$cov" >> {output.stats}
 """
 
-rule CombineStats:
+rule CollectFlagStats:
     input:
-        stats=expand("{asm}.{hap}/stats.txt",asm=asms,hap=haps)
+        sup=expand("{{asm}}.{{hap}}/{{method}}/sv.{check}.bed",check=checks)
+    output:
+        flags="{asm}.{hap}/{method}/stats_flag.txt"
+    params:
+        grid_opts=config["grid_small"],
+        ref=config["ref"]
+    shell:"""
+
+pass=$(cat {input.sup[0]} | wc -l)
+
+fail=$(cat {input.sup[1]} | wc -l) ; centro=$(cat {input.sup[1]} | awk '{{if ($7==1 && $8+$9==0) print}}' | wc -l) 
+high=$(cat {input.sup[1]} | awk '{{if ($8==1 && $7+$9==0) print}}' | wc -l) ; unsup=$(cat {input.sup[1]} | awk '{{if ($9==1 && $7+$8==0) print}}' | wc -l)
+centro_high=$(cat {input.sup[1]} | awk '{{if ($7+$8==2 && $9==0) print}}' | wc -l) ; centro_unsup=$(cat {input.sup[1]} | awk '{{if ($7+$9==2 && $8==0) print}}' | wc -l)
+high_unsup=$(cat {input.sup[1]} | awk '{{if ($8+$9==2 && $7==0) print}}' | wc -l) ; centro_high_unsup=$(cat {input.sup[1]} | awk '{{if ($7+$8+$9==3) print}}' | wc -l)
+
+total=$(($pass+$fail)) ; total_centro=$(($total-$centro-$centro_high-$centro_unsup-$centro_high_unsup)) ; total_centro_high=$(($total_centro-$high-$high_unsup)) ; full_sup=$(($total_centro_high-$unsup))
+
+echo -e "{wildcards.method}.{wildcards.asm}.{wildcards.hap}\t$total\t$total_centro\t$total_centro_high\t$full_sup\t$centro\t \
+         $high\t$unsup\t$centro_high\t$centro_unsup\t$high_unsup\t$centro_high_unsup" >> {output.flags}
+"""
+
+rule CombineRunStats:
+    input:
+        stats=expand("{asm}.{hap}/{method}/stats.txt",asm=asms,hap=haps,method=methods),
+        flags=expand("{asm}.{hap}/{method}/stats_flag.txt",asm=asms,hap=haps,method=methods)
     output:
         all="run_stats_all.txt"
     shell:"""
 
-echo -e "Assembly\tN50\tmm2BrdthCov\tlraBrdthCov\tmm2SVs\tlraSVs\tmm2Sup\tlraSup" > {output.all}
-for inpStat in {input.stats}; do cat $inpStat | tail -n 1 >> {output.all} ; done
+echo -e "Assembly\tN50\tBasesCov\tTotal\tTotal-Centro\tTotal-Centro-HighCov\tSup\n" | cat - <(paste <(cat {input.stats}) <(cat {input.flags} | cut -f 2-5)) > {output.all} 
+"""
+
+rule CombineFlagStats:
+    input:
+        stats=expand("{asm}.{hap}/{method}/stats_flag.txt",asm=asms,hap=haps,method=methods)
+    output:
+        all="run_stats_all_flags.txt"
+    shell:"""
+
+echo -e "Assembly\tTotal\tTotal-Centro\tTotal-Centro-HighCov\tFullSup\tCentro\tHighCov\tUnSup\tCentroHigh\tCentroUnsup\tHighUnsup\tCentroHighUnsup" | cat - {input.stats} > {output.all}
 """
