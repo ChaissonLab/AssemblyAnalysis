@@ -23,7 +23,8 @@ haps=["1", "2"]
 assemblers=config["assemblers"]
 
 datasets = [entry for entry in config["datasets"].keys()]
-
+if "partition" not in config:
+    config["partition"] = cmb
 rule all:
     input:
         config=expand("{dataset}/{assembler}/partitioned_assembly.json", dataset=datasets, assembler=assemblers, hap=haps),
@@ -33,7 +34,8 @@ rule all:
 rule GenerateJSON:
     input:
         bams=lambda wildcards: config["datasets"][wildcards.datasetID]["bams"],
-        vcf=lambda wildcards: config["datasets"][wildcards.datasetID]["vcf"]
+        vcf=lambda wildcards: config["datasets"][wildcards.datasetID]["vcf"],
+        json="multi_asm.json"
     output:
         json="{datasetID}/{assembler}/partitioned_assembly.json",
     params:
@@ -42,10 +44,11 @@ rule GenerateJSON:
         wd=lambda wildcards: config["workingDir"] + "/" + wildcards.datasetID,
         ref=config["ref"],
         readtype=lambda wildcards: config["datasets"][wildcards.datasetID]["datatype"],
-        workingDir=config["workingDir"]
+        workingDir=config["workingDir"],
+        part=config["partition"]
     shell:"""
 mkdir -p {wildcards.datasetID}/{wildcards.assembler}
-{params.sd}/CreateAssemblyJSON.py --bams {input.bams} --workingDir {params.workingDir}/{wildcards.datasetID}/{wildcards.assembler}/run --sample {params.sample} --ref {params.ref} --vcf {input.vcf} --readtype {params.readtype} --assembler {wildcards.assembler} > {wildcards.datasetID}/{wildcards.assembler}/partitioned_assembly.json
+{params.sd}/CreateAssemblyJSON.py --bams {input.bams} --workingDir {params.workingDir}/{wildcards.datasetID}/{wildcards.assembler}/run --sample {params.sample} --ref {params.ref} --vcf {input.vcf} --readtype {params.readtype} --assembler {wildcards.assembler} > {wildcards.datasetID}/{wildcards.assembler}/partitioned_assembly.json --partition={params.part}
 """
 
 
@@ -59,10 +62,13 @@ rule RunAssembly:
         pd=config["pd"],
         jobs_per_run=config["jobs_per_run"]
     shell:"""
+if [ -e {output.asms[0]} ]; then
+  exit 0;
+fi
 mkdir -p {params.wd}
 cp {input.json} {params.wd}/
-pushd {params.wd} && snakemake -p -s {params.pd}/PartitionedAssembly.snakefile  -j {params.jobs_per_run} --cluster " {{params.grid_opts}} -c {{resources.threads}} --mem={{resources.mem_gb}}G {{params.node_constraint}} "  --restart-times 4  && popd
-cp {params.wd}/assembly.*.consensus.fasta {wildcards.dataset}/{wildcards.assembler}/
+pushd {params.wd} && snakemake -p -s {params.pd}/PartitionedAssembly.snakefile  -j {params.jobs_per_run} --cluster " {{params.grid_opts}} -c {{resources.threads}} --mem={{resources.mem_gb}}G {{params.node_constraint}} "  --restart-times 100 --rerun-incomplete && popd ; 
+cp {params.wd}/assembly.*.consensus.fasta {wildcards.dataset}/{wildcards.assembler}/ ;
 rm -rf {params.wd}/
 
 """

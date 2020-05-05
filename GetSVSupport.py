@@ -2,6 +2,7 @@
 
 
 import sys
+n=0
 for line in sys.stdin:
     vals=line.split()
     svLen = int(vals[2]) - int(vals[1])
@@ -17,6 +18,9 @@ for line in sys.stdin:
                 nSup+=1
     vals = vals[0:5] + [str(nSup)]
     sys.stdout.write("\t".join(vals) + "\n")
+    n+=1
+    if n % 200 == 0:
+        sys.stdout.flush()
 
         
     

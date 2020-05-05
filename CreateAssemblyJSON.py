@@ -9,6 +9,7 @@ ap.add_argument("--workingDir", help="Run the assembly in this directory", requi
 ap.add_argument("--sample", help="Sample", required=True)
 ap.add_argument("--vcf", help="Phasing vcf", required=True)
 ap.add_argument("--ref", help="Ref", required=True)
+ap.add_argument("--partition", help="Optional partition", default="cmb")
 args=ap.parse_args()
 
 if args.readtype == "ccs" or args.readtype == "ont":
@@ -16,19 +17,28 @@ if args.readtype == "ccs" or args.readtype == "ont":
 else:
     consensus = "arrow"
 
+part=args.partition
+
 sys.stdout.write("""{{ 
     "bam" : [{}],
     "working_dir" : "{}",
     "sample" : "{}",
     "ref" : "{}",
     "vcf" : "{}",
-    "grid_large" : "sbatch --time=24:00:00 --partition=cmb",
-    "grid_manycore" : "sbatch --time=48:00:00 --partition=cmb",
-    "grid_medium" : "sbatch --time=24:00:00 --partition=cmb",
-    "grid_small" : "sbatch --time=4:00:00 --partition=cmb",
-    "grid_blat" : "sbatch --time=24:00:00 --partition=cmb",
+    "partition" : {},
+    "grid_large" : "sbatch --time=24:00:00 --partition={}",
+    "grid_manycore" : "sbatch --time=48:00:00 --partition={}",
+    "grid_medium" : "sbatch --time=24:00:00 --partition={}",
+    "grid_small" : "sbatch --time=4:00:00 --partition={}",
+    "grid_blat" : "sbatch --time=24:00:00 --partition={}",
     "read-type" : "{}",
     "consensus" : "{}",
     "assembler" : "{}"
-}}""".format(", ".join(args.bams), args.workingDir, args.sample, args.ref, args.vcf, args.readtype, consensus, args.assembler))
+}}""".format(", ".join(args.bams), args.workingDir, args.sample, args.ref, args.vcf, 
+             args.partition,
+             args.partition,
+             args.partition,
+             args.partition,
+             args.partition,
+             args.partition, args.readtype, consensus, args.assembler))
 

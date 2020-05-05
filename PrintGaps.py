@@ -19,7 +19,6 @@ ap.add_argument("--minAlignmentLength", help="Minimum length of aligned sequence
 ap.add_argument("--minFraction", help="Minimum fraction of contig to keep in an alignment.", default=0.00,type=float)
 ap.add_argument("--maxLength", help="Maximum gap length.", default=None, type=int)
 ap.add_argument("--outFile", help="Print output here, default= stdout", default=None)
-ap.add_argument("--context", help="Print surrounding context", default=0, type=int)
 ap.add_argument("--condense", help="Pack indels if the matches separating them is less than this value.", default=0, type=int)
 ap.add_argument("--tsd", help="Attempt to find Target Site Duplications at most this length", default=20, type=int)
 ap.add_argument("--outsam", help="Write the modified condensed sam to a file.", default=None)
@@ -30,6 +29,7 @@ ap.add_argument("--nloc", help="Print locations of aligned N's here.", default=N
 ap.add_argument("--contigBed", help="Print where contigs map.", default=None)
 ap.add_argument("--status", help="Print how far along the alignments are.", default=False, action='store_true')
 ap.add_argument("--blacklist", help="Exclude contigs on this list from callsets.", default=None)
+ap.add_argument("--printAlignedLength", help="Print the length of the aligned sequence.", default=False)
 ap.add_argument("--flank", help="Amount of flank to compute identity for ", default=0,type=int)
 ap.add_argument("--flankIdentity", help="Identity required of flank.", default=0.95, type=float)
 ap.add_argument("--maxMasked", help="Ignore variants with this many or more N's.,0=allow all", default=0,type=int)
@@ -133,8 +133,6 @@ import re
 coordRe = re.compile(".*(chr.*)\.(\d+)-(\d+).*")
 
 outFile.write("#chrom\ttStart\ttEnd\tsvType\tsvLen\tsvSeq\ttsd\tqName\tqStart\tqEnd")
-if (args.context):
-    outFile.write("\tcontext")
 if (args.printStrand):
     outFile.write("\tqueryStrand")
 if (args.printLength):
@@ -191,19 +189,6 @@ for samFileName in args.sam:
         #
         aln.tStart -=1
         aln.tEnd -=1
-        if (args.onTarget == True):
-            coordReMatch = coordRe.match(aln.title)
-            if (coordReMatch is not None):
-                coordMatchGroups = coordReMatch.groups()
-                srcChrom = coordMatchGroups[0]
-                srcStart = int(coordMatchGroups[1])
-                srcEnd   = int(coordMatchGroups[2])
-                if (srcChrom != aln.tName):
-                    print("off target chromosome: " + srcChrom + " " + aln.tName)
-                    continue
-                if (((srcStart >= aln.tStart and srcStart < aln.tEnd) or (srcEnd >= aln.tStart and srcEnd < aln.tEnd) or (srcStart < aln.tStart and srcEnd > aln.tEnd )) == False): 
-                    print("no overlap " + srcChrom + " " + str(srcStart) + " " + str(srcEnd) + " alignment: " + str(aln.tStart) + " "+ str(aln.tEnd))
-                    continue
 
         if (aln.mapqv < args.minq):
             continue
@@ -385,7 +370,7 @@ for samFileName in args.sam:
             
         if (args.flank != 0 and (frontIdent < args.flankIdentity or backIdent < args.flankIdentity)):
             continue
-        
+
         for i in range(len(packedOps)):
             op = packedOps[i]
             oplen  = packedLengths[i]
@@ -396,18 +381,14 @@ for samFileName in args.sam:
             if (IsMatch(op)):
                 # Inside match block (if op == M)
                 if (args.snv is not None):
-                    targetSeq = Tools.ExtractSeq((aln.tName, tPos,tPos+oplen), genomeFile, fai)
-                    querySeq  = aln.seq[qPos:qPos+oplen]
+                    targetSeq = Tools.ExtractSeq((aln.tName, tPos,tPos+oplen), genomeFile, fai).strip().upper()
+                    querySeq  = aln.seq[qPos:qPos+oplen].strip().upper()
                     nMis = 0
-#                    if (len(targetSeq) != len(querySeq)):
-#                        print "ERROR IN SEQ"
-#                        print aln.title
                     for mp in range(0,len(targetSeq)):
                         if (mp >= len(querySeq) or mp >= len(targetSeq)):
                             print("ERROR with seq " + aln.title)
                             continue
-                            
-                        if (querySeq[mp].upper() != targetSeq[mp].upper() and targetSeq[mp].upper() != 'N' and querySeq[mp].upper() != 'N'):
+                        if (querySeq[mp] != targetSeq[mp] and targetSeq[mp].upper() != 'N' and querySeq[mp].upper() != 'N'):
                             nMis +=1
                             snvOut.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(aln.tName, tPos+mp, tPos+mp+1, targetSeq[mp], querySeq[mp], aln.title, mp+qPos ))
                         if (args.nloc is not None and (targetSeq[mp].upper() == 'N' or querySeq[mp].upper() == 'N')):
@@ -484,13 +465,10 @@ for samFileName in args.sam:
                                     else:
                                         outFile = h2File
                         outFile.write("{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(chrName, tPos, tPos + oplen, "insertion", oplen, gapSeq, tsd, aln.title, qPos, qPos + oplen))
-                        if (args.context > 0):
-                            outFile.write("\t{}".format(homopolymer))
                         if (args.printStrand):
                             outFile.write("\t{}".format(aln.qStrand))
                         if (args.printLength):
-                            outFile.write("\t{}".format(aln.seq))
-
+                            outFile.write("\t{}".format(int(aln.qEnd - aln.qStart)))
                         if args.fractionMasked is True:
                             nMasked = gapSeq.count('N')
                             frac = '0'
@@ -511,15 +489,10 @@ for samFileName in args.sam:
                     chrName = aln.tName
                     if (tPos > fai[chrName][0]):
                         print("ERROR! tpos is past the genome end." + str(tPos) + " " + str(fai[chrName][0]))
-                    delStart = max(tPos - args.context, 0)
-                    delEnd   = min(tPos + args.context + oplen, fai[chrName][0])
+                    delStart = tPos
+                    delEnd   = tPos + oplen
                     if (delEnd < delStart):
                         continue
-                    context= aln.seq[qPos+oplen:min(qPos+oplen+args.context, len(aln.seq))]
-                    if (context == "A"*len(context) or context == "T"*len(context)):
-                        homopolymer="T"
-                    else:
-                        homopolymer="F"
 
                     #delSeq = genomeDict[chrName].seq[delStart:delEnd].tostring()
                     delSeq = Tools.ExtractSeq([chrName, delStart, delEnd], genomeFile, fai)
@@ -559,8 +532,10 @@ for samFileName in args.sam:
                                     print("SET OUTFILE \n\n\n")
  
                         outFile.write("{}\t{}\t{}\t{}\t{}\t{}\tno_tsd\t{}\t{}\t{}".format(chrName, tPos, tPos + oplen, "deletion", oplen, delSeq, aln.title, qPos, qPos))
-                        if (args.context > 0):
-                            outFile.write("\t{}".format(homopolymer))
+                        if (args.printStrand):
+                            outFile.write("\t{}".format(aln.qStrand))
+                        if (args.printLength):
+                            outFile.write("\t{}".format(int(aln.qEnd - aln.qStart)))
 
                         if args.fractionMasked is True:
                             nMasked = delSeq.count('N')
