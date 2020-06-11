@@ -114,14 +114,19 @@ def GetConstraint(method):
     else:
         return ""
 
+def GetMemoryConstraint(method):
+    if method == "lra":
+        return 64
+    else:
+       return 32
+
 rule MapFasta:
     input:
         asm=lambda wildcards: asmFiles[wildcards.asm]["assemb"][wildcards.hap]
     output:
         bam=protected("{asm}.{hap}/{method}/aln.bam")
     resources:
-        threads=12,
-        mem_gb=lambda wildcards, attempt: 24+16*attempt,
+        mem_gb=lambda wildcards, attempt: GetMemoryConstraint(wildcards.method) + (attempt-1)*16
     params:
         grid_opts=config["grid_memory"],
         readType=lambda wildcards: asmFiles[wildcards.asm]["readType"],
@@ -133,9 +138,9 @@ if [ ! -e {output.bam} ]; then
 mkdir -p {wildcards.asm}.{wildcards.hap}/{wildcards.method}
 
 if [ {wildcards.method} == mm2 ] ; then \
-   minimap2 -t 12 -ax asm10 --cs {params.ref} {input.asm} ; \
+   minimap2 -t 8 -ax asm10 --cs {params.ref} {input.asm} ; \
 elif [ {wildcards.method} == lra ] ; then \
-   lra align -CONTIG -t 8 {params.ref} {input.asm} -p s ; fi | samtools sort -@2 -T $TMPDIR/$$ -m2G -o {output.bam}
+   /home/cmb-16/mjc/mchaisso/projects/LRA/lra align -t 4 {params.ref} {input.asm} -p s ; fi | samtools sort -@2 -T $TMPDIR/$$ -m2G -o {output.bam}
 
 samtools index {output.bam}
 else
@@ -168,7 +173,7 @@ samtools view -h {input.bam} | \
            print $1"\\t"$2"\\t"$2+diff"\\t"oper"\\t"diff"\\t"$4"\\t"$5"\\t0"}} }}' ; \
    elif [ {wildcards.method} == lra ] ; then \
      {params.sd}/PrintGaps.py {params.ref} /dev/stdin --minAlignmentLength 50000 --printLength | tail -n +2 | cut -f1-7,11 ; fi | \
-   awk '!keep[$1,$2,$3,$4]++' OFS="\\t" | bedtools sort | bedtools intersect -v -a stdin -b /home/cmb-16/mjc/shared/references/hg38/regions/cytobands/LowComplexity.bed > {output.bed}
+   awk '!keep[$1,$2,$3,$4]++' OFS="\\t" | bedtools sort > {output.bed}
 """
 
 #
@@ -324,7 +329,7 @@ rule GetVariantSupport:
         node_constraint=""
     resources:
 # This needs a gargantuan amount of memory from a bug in groupby
-        mem_gb=lambda wildcards, attempt: 12+16*attempt,
+        mem_gb=lambda wildcards, attempt: 16,
     shell:"""
 bedtools slop -g {params.ref}.fai -b 1000 -i {input.sup} | \
   bedtools intersect -sorted -loj -a {input.bed} -b stdin | \
